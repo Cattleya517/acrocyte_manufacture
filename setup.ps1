@@ -1,4 +1,4 @@
-# acrocyte_manufacture — Windows 啟動安裝腳本
+﻿# acrocyte_manufacture — Windows 啟動安裝腳本
 # 用法（推薦）：在這個資料夾上按右鍵，點「在終端開啟」(Windows 11) 後執行
 #     .\setup.ps1
 # 若被執行原則擋住，改用：
@@ -8,6 +8,9 @@
 #Requires -Version 5
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+
+# 強制 console 輸出用 UTF-8（避免 Write-Host 中文亂碼）
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}
 
 # 切換到腳本所在目錄
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
