@@ -38,7 +38,7 @@ Three layers, top-down:
 
 ### Things future-you will trip over
 
-- **`javabridge` / `bioformats` are mocked in `cli.py` before importing `ashlar.reg`.** Ashlar imports them at module load even though we never call into Java for plain TIFF. The mock is what makes Windows installs work (no JVM dependency). The order matters — the `sys.modules.setdefault(...)` calls must be above `from ashlar.reg import ...`.
+- **`jnius` / `jnius_config` are mocked in `cli.py` before importing `ashlar.reg`.** Ashlar 1.20 imports them at module load and *also calls into them at module load* (`jnius_config.vm_running`, `jnius.autoclass(...)`, `DebugTools.setRootLevel(...)`), even though we never use BioFormats for plain TIFF. Without the mock the import chain calls `jnius.env.get_jdk_home()` which raises `Exception('Unable to find JAVA_HOME')` on machines without a JDK — i.e. every fresh Windows install. The mock is a single `_Stub` object whose `__call__` and `__getattr__` both return self, so arbitrary chains (`DebugTools.setRootLevel("ERROR")`) and truthy reads (`jnius_config.vm_running`) succeed without a JVM. Order matters — the `sys.modules.setdefault(...)` calls must be above `from ashlar.reg import ...`. (Earlier ashlar versions used `javabridge` / `bioformats` directly; if you ever upgrade and see those names back in tracebacks, mock them the same way.)
 
 - **Four hard version pins in `pyproject.toml`, all for ashlar compatibility.** Don't loosen any without rerunning a full stitch on real data.
   - `scikit-image>=0.19.3,<0.23` — 0.23 lazy-loading breaks ashlar import. Mirrors acrocyte main repo.

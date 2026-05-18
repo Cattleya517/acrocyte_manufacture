@@ -1,12 +1,24 @@
 """acrocyte-manufacture CLI: batch stitching of MetaXpress TIFF tiles."""
 
-# Mock javabridge/bioformats BEFORE importing ashlar — ashlar.reg imports
-# them at module load but we only ever read plain TIFFs, so the Java stack
-# is dead weight that breaks Windows installs.
+# Mock jnius / jnius_config BEFORE importing ashlar — ashlar.reg imports
+# them at module load (and calls into them: `jnius_config.vm_running`,
+# `jnius.autoclass(...)`, `DebugTools.setRootLevel(...)`) but we only
+# ever read plain TIFFs, so the JVM is dead weight that breaks Windows
+# installs where no JDK is present.
 import sys
-import types
-sys.modules.setdefault("javabridge", types.ModuleType("javabridge"))
-sys.modules.setdefault("bioformats", types.ModuleType("bioformats"))
+
+
+class _Stub:
+    # Any attribute access or call returns self, so chained calls like
+    # `DebugTools.setRootLevel("ERROR")` and truthy reads like
+    # `jnius_config.vm_running` both succeed without a JVM.
+    def __call__(self, *a, **kw): return self
+    def __getattr__(self, name): return self
+
+
+_stub = _Stub()
+sys.modules.setdefault("jnius", _stub)
+sys.modules.setdefault("jnius_config", _stub)
 
 import argparse
 import datetime
