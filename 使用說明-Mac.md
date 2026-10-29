@@ -59,7 +59,7 @@ bash setup.sh
 
 1. **偵測有沒有 `uv`**（Python 套件管理工具），沒有就幫你裝
 2. **偵測 / 安裝 Python 3.11**
-3. **安裝縫圖需要的所有套件**（ashlar、scikit-image、tifffile、numpy、pandas、tqdm、networkx）
+3. **安裝縫圖需要的所有套件**（ashlar、scikit-image、tifffile、numpy、tqdm）
 
 第一次跑大約需要 **3–10 分鐘**，請耐心等到看到：
 
@@ -184,6 +184,33 @@ RCE-24W-Sample-V52-Control-G-HT2/
 
 - `ScanTime`：原始 tile 的拍攝時間
 - `StitchTime`：這次縫圖完成的時間
+
+### 用什麼軟體開縫好的 TIF？
+
+**請用 [Fiji](https://fiji.sc/)，不要用原版 ImageJ。**
+
+原版 ImageJ 打開會出現 **「Unsupported format」** 錯誤，這不是檔案壞掉。
+因為縫好的 `.tif` 其實是 **OME-TIFF + BigTIFF + 多解析度金字塔**三合一格式：
+裡面有完整的顯微鏡 metadata（pixel size、channel 名、拍攝時間），檔案可以超過 4GB，
+並內建縮圖快取讓大圖能瞬開。原版 ImageJ 三個都不支援。
+
+**Fiji = ImageJ + 一堆預裝插件**，其中 **Bio-Formats** 這個插件就能讀以上格式。
+研究室裡做螢光影像的人幾乎都用 Fiji，不會跟原版 ImageJ 衝突，兩個可以並存。
+
+**安裝 Fiji**：
+
+1. 到 <https://fiji.sc/> 點「Download」→ 選 **macOS**
+2. 下載到的 `.zip` 解壓後得到 `Fiji.app`
+3. 把 `Fiji.app` 拖到「應用程式 / Applications」資料夾
+4. 第一次打開若被擋下，到「系統設定 → 隱私權與安全性」按「仍要開啟」
+
+**開縫好的圖**：
+
+- 直接把 `.tif` 從 Finder 拖到 Fiji 視窗，或用 `File → Open`
+- 會跳出「Bio-Formats Import Options」對話框，**直接按 OK 即可**（預設值就好）
+- 第一次打開大圖可能要 5–30 秒讀金字塔，之後縮放就很順
+
+> 進階選項：QuPath（病理影像專用）、napari（Python）也能讀。看個人習慣。
 
 ---
 

@@ -1,142 +1,122 @@
-"""MetaMorph / MetaXpress TIFF helper.
+"""Scan a MetaMorph / MetaXpress tile folder into a plain list of sites.
 
-Adapted from acrocyte_simple-stitch-app/stitcher/metamorphtiff.py — trimmed
-to remove the SpatialData/dask export paths which are not needed in the CLI
-stitching pipeline.
+Series indices come from binned stage positions (raster order), channels from
+the ``_IllumSetting_`` PlaneInfo prop — never from the filename.
 """
 
 import re
 import xml.etree.ElementTree as ET
 from itertools import groupby
+from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import tifffile
 from tqdm import tqdm
 
-from ._channelinfo import name_to_rank
+# Loose on purpose: only filters what to scan. plate/well come from the name,
+# everything else (series, channel) from TIFF metadata.
+MD_PATTERN = re.compile(r"(?P<plate_name>.+)_(?P<well_name>[A-Z]\d{2})_.+\.tiff?$")
+
+# Channel ordering within a site: DAPI first, unknown names last (alphabetical).
+_RANK = {alias: rank for rank, aliases in enumerate([
+    ("B", "DAPI", "HOECHST", "W0"),
+    ("G", "FITC", "CD45"),
+    ("TRANSMITTEDLIGHT", "TX"),
+    ("Y", "TRITC", "HER2", "PDL1", "PD-L1", "TEXASRED"),
+    ("K", "TL25"),
+    ("R", "CY5", "EPCAM"),
+]) for alias in aliases}
+
+_PROPS = {
+    "pixel-size-x": int, "pixel-size-y": int, "bits-per-pixel": int,
+    "spatial-calibration-x": float, "spatial-calibration-y": float,
+    "spatial-calibration-units": str,
+    "stage-position-x": float, "stage-position-y": float,
+    "_IllumSetting_": str,
+}
 
 
-# MD (Molecular Devices) image filename pattern.
-# - plate_name: anything up to the well separator
-# - well_name:  one uppercase letter + two digits (A01, B12, ...)
-# - everything after the well is matched loosely (series/channel/UUID/extension)
-MD_PATTERN = r"(?P<plate_name>.+)_(?P<well_name>[A-Z]\d{2})_.+\.tiff?"
+def _rank(channel_name):
+    n = channel_name.replace(" ", "").upper()
+    return _RANK.get(n, 99), n
 
 
-class MetaMorphTIFFHelper:
-    def __init__(self, path, pattern=MD_PATTERN):
-        self.path = path
-        self.pattern = pattern
+def _plane_info(path: Path) -> dict:
+    with tifffile.TiffFile(path) as tif:
+        tags = tif.pages[0].tags
+        desc = tags.get("ImageDescription")
+        try:
+            plane = ET.fromstring(desc.value).find("PlaneInfo") if desc else None
+        except ET.ParseError:
+            plane = None
+        if plane is None:
+            raise ValueError(f"{path.name}: TIFF 中找不到 PlaneInfo 區塊（非 MetaXpress 來源？）")
+        info = {
+            p.attrib["id"]: _PROPS[p.attrib["id"]](p.attrib["value"])
+            for p in plane.findall("prop") if p.attrib["id"] in _PROPS
+        }
+        dt = tags.get("DateTime")
+        info["DateTime"] = dt.value if dt else None
+    if "spatial-calibration-x" not in info:
+        raise ValueError(f"{path.name}: TIFF metadata 缺少 spatial-calibration 欄位（非 MetaXpress 來源？）")
+    if info["spatial-calibration-units"] != "um":
+        raise ValueError(f"{path.name}: 不支援的 pixel 單位 {info['spatial-calibration-units']!r}")
+    if info["spatial-calibration-x"] != info["spatial-calibration-y"]:
+        raise ValueError(f"{path.name}: TIFF 的 pixel 不是正方形，ashlar 不支援")
+    return info
 
-    def to_dataframe(self):
-        records = []
-        self._collect_image_files(records)
-        self._extract_image_metadata(records)
-        self._sort_raster_order(records)
-        return self._convert_to_dataframe(records)
 
-    # ---------------------------------------------------------------------
-    # Filter out thumbnails / sidecars by size and match MD_PATTERN.
-    def _collect_image_files(self, records, min_filesize=1_000_000):
-        all_files = [
-            p for p in self.path.iterdir()
-            if p.is_file() and not p.name.startswith(".")
-        ]
-        all_files = [p for p in all_files if p.stat().st_size >= min_filesize]
-        for p in tqdm(all_files, desc="掃描檔名"):
-            match = re.match(self.pattern, p.name)
-            if match is not None:
-                gd = match.groupdict()
-                records.append({
-                    "plate_name":  gd["plate_name"],
-                    "well_name":   gd["well_name"],
-                    "series_idx":  None,
-                    "channel_idx": None,
-                    "file_path":   str(p),
+def scan(path: Path, min_filesize=1_000_000, tol=10):
+    """Return (sites, plates).
+
+    sites[i]  = {"position", "size", "pixel_size", "dtype", "channels", "paths", "scan_time"}
+                position/size are (y, x) in pixels; channels/paths are tuples in rank order.
+    plates    = [(plate_name, [(well_name, [site_idx, ...]), ...]), ...], lexical order.
+
+    Files under ``min_filesize`` bytes (thumbnails, sidecars) are ignored.
+    Stage positions are binned to ``tol`` pixels so jitter doesn't break raster order.
+    """
+    files = [
+        p for p in sorted(path.iterdir())
+        if p.is_file() and not p.name.startswith(".")  # macOS ._ sidecars
+        and MD_PATTERN.match(p.name) and p.stat().st_size >= min_filesize
+    ]
+    if not files:
+        raise ValueError("沒有任何 TIFF 通過 MetaXpress 檔名過濾")
+
+    recs = []
+    # ponytail: serial header reads; ThreadPoolExecutor here if a NAS scan measures slow
+    for p in tqdm(files, desc="讀取 TIFF metadata"):
+        m = MD_PATTERN.match(p.name).groupdict()
+        info = _plane_info(p)
+        delta = info["spatial-calibration-x"]
+        pos = np.array([info["stage-position-y"], info["stage-position-x"]]) / delta
+        recs.append({
+            "plate": m["plate_name"], "well": m["well_name"],
+            "bin": tuple((pos // tol).astype(int)), "channel": info.get("_IllumSetting_", ""),
+            "position": pos, "size": np.array([info["pixel-size-y"], info["pixel-size-x"]]),
+            "pixel_size": delta, "dtype": np.dtype(f"uint{info['bits-per-pixel']}"),
+            "path": str(p), "scan_time": info["DateTime"],
+        })
+    recs.sort(key=lambda r: (r["plate"], r["well"], r["bin"], _rank(r["channel"])))
+
+    # Normalize positions to start at (0, 0) — avoids float precision issues in ashlar.
+    origin = np.min([r["position"] for r in recs], axis=0)
+
+    sites, plates = [], []
+    for plate, prs in groupby(recs, key=lambda r: r["plate"]):
+        wells = []
+        for well, wrs in groupby(prs, key=lambda r: r["well"]):
+            idx = []
+            for _, srs in groupby(wrs, key=lambda r: r["bin"]):
+                srs = list(srs)
+                idx.append(len(sites))
+                sites.append({
+                    **{k: srs[0][k] for k in ("size", "pixel_size", "dtype", "scan_time")},
+                    "position": srs[0]["position"] - origin,
+                    "channels": tuple(r["channel"] for r in srs),
+                    "paths": tuple(r["path"] for r in srs),
                 })
-
-    # ---------------------------------------------------------------------
-    # Read MetaMorph PlaneInfo block from each TIFF's ImageDescription tag.
-    def _extract_image_metadata(self, records):
-        extracted_properties = [
-            "pixel-size-x", "pixel-size-y",
-            "bits-per-pixel",
-            "spatial-calibration-x", "spatial-calibration-y", "spatial-calibration-units",
-            "stage-position-x", "stage-position-y",
-            "_IllumSetting_",
-        ]
-        convert = {"int": int, "float": float, "string": str}
-
-        for record in tqdm(records, desc="讀取 TIFF metadata"):
-            prop = {}
-            with tifffile.TiffFile(record["file_path"]) as tif:
-                root = ET.fromstring(tif.pages[0].tags["ImageDescription"].value)
-                for p in root.find("PlaneInfo").findall("prop"):
-                    if p.attrib["id"] in extracted_properties:
-                        prop[p.attrib["id"]] = convert[p.attrib["type"]](p.attrib["value"])
-
-            assert prop["spatial-calibration-units"] == "um", "unsupported pixel size unit"
-            assert prop["spatial-calibration-x"] == prop["spatial-calibration-y"], "non-square pixels are not supported"
-
-            delta = prop["spatial-calibration-x"]
-            record["pixel_size"]    = delta
-            record["pixel_dtype"]   = np.dtype(f"uint{prop['bits-per-pixel']}")
-            record["tile_size"]     = np.array([prop["pixel-size-y"], prop["pixel-size-x"]])
-            record["tile_position"] = np.array([prop["stage-position-y"], prop["stage-position-x"]]) / delta
-            record["channel_name"]  = prop.get("_IllumSetting_", str(record["channel_idx"]))
-
-    # ---------------------------------------------------------------------
-    # Group tiles by (plate, well), then by binned stage position. Within
-    # each tile position, sort channels by channel rank (DAPI first).
-    @staticmethod
-    def _sort_raster_order(records, tol=10):
-        for r in records:
-            r["_pos"] = tuple((r["tile_position"] // tol).astype(int))
-
-        key_well = lambda r: (r["plate_name"], r["well_name"])
-        records.sort(key=key_well)
-
-        for _, well_group in groupby(records, key=key_well):
-            well_records = list(well_group)
-            well_records.sort(key=lambda r: r["_pos"])
-
-            series_idx = 0
-            for _, pos_group in groupby(well_records, key=lambda r: r["_pos"]):
-                pos_records = sorted(pos_group, key=lambda r: name_to_rank(r["channel_name"]))
-                for channel_idx, r in enumerate(pos_records):
-                    r["series_idx"]  = series_idx
-                    r["channel_idx"] = channel_idx
-                series_idx += 1
-
-        for r in records:
-            del r["_pos"]
-
-    # ---------------------------------------------------------------------
-    def _convert_to_dataframe(self, records):
-        df = pd.DataFrame.from_records(records)
-        if df.empty:
-            raise ValueError("沒有任何 TIFF 通過 MetaXpress 檔名過濾")
-
-        df["plate_idx"] = df["plate_name"].astype("category").cat.codes
-        df["well_idx"]  = (
-            df.groupby("plate_name")["well_name"]
-            .transform(lambda w: w.astype("category").cat.codes)
-        )
-        df = df.set_index(["plate_idx", "well_idx", "series_idx", "channel_idx"]).sort_index()
-
-        df = df.groupby(level=["plate_idx", "well_idx", "series_idx"], sort=False).agg({
-            "plate_name":    "first",
-            "well_name":     "first",
-            "pixel_size":    "first",
-            "pixel_dtype":   "first",
-            "tile_size":     "first",
-            "tile_position": "first",
-            "channel_name":  tuple,
-            "file_path":     tuple,
-        }).sort_index()
-
-        return df
-
-
-__all__ = ["MetaMorphTIFFHelper", "MD_PATTERN"]
+            wells.append((well, idx))
+        plates.append((plate, wells))
+    return sites, plates
