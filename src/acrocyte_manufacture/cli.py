@@ -6,6 +6,7 @@
 # ever read plain TIFFs, so the JVM is dead weight that breaks Windows
 # installs where no JDK is present.
 import sys
+import time
 
 
 class _Stub:
@@ -136,7 +137,10 @@ def _inject_times_into_ome(path: Path, scan_time, stitch_time):
 def stitch_plate(plate_name: str, plate_dir: Path, tile_dir: Path,
                  output_dir, verbose: bool = False):
     if output_dir is None:
-        output_dir = plate_dir
+        # Not plate_dir itself: MetaXpress leaves a .HTD there, and Bio-Formats
+        # then picks CellWorxReader for *any* TIFF in that folder and crashes
+        # (ArrayIndexOutOfBounds in CellWorxReader.getFile). A subfolder has no HTD.
+        output_dir = plate_dir / "stitched"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     reader = FileSeriesReader2(tile_dir)
@@ -187,7 +191,9 @@ def stitch_plate(plate_name: str, plate_dir: Path, tile_dir: Path,
             # we want the physical channel name as recorded by the microscope.
             raw_name = complete_names[c] or str(c)
             safe_title = "".join(ch for ch in raw_name if ch.isalnum() or ch in "-_") or f"c{c}"
-            out_path = output_dir / f"{tag}-{safe_title}.tif"
+            # .ome.tif so Fiji hands the file to Bio-Formats; plain .tif goes to
+            # ImageJ's native reader, which cannot open BigTIFF.
+            out_path = output_dir / f"{tag}-{safe_title}.ome.tif"
 
             mosaic = Mosaic(
                 aligner,
@@ -203,12 +209,21 @@ def stitch_plate(plate_name: str, plate_dir: Path, tile_dir: Path,
         print(f"  ⚠ 略過 {len(skipped_wells)} 個 well（資料不齊）：")
         for w, reason in skipped_wells:
             print(f"      {w}: {reason}")
-    return written
+    return written, len(plate_wells) - len(skipped_wells)
 
 
 # ---------------------------------------------------------------------------
 # Error formatting
 # ---------------------------------------------------------------------------
+def _timing(seconds: float, n_wells: int) -> str:
+    """'  耗時 1 分 23 秒（3 個 well，平均 27.7 秒/well）' — well 部分在 0 well 時省略。"""
+    m, sec = divmod(int(seconds), 60)
+    txt = f"  耗時 {m} 分 {sec} 秒" if m else f"  耗時 {seconds:.1f} 秒"
+    if n_wells:
+        txt += f"（{n_wells} 個 well，平均 {seconds / n_wells:.1f} 秒/well）"
+    return txt
+
+
 def _human_error(exc: BaseException) -> str:
     # metamorphtiff.scan raises ValueError with a user-facing (zh-TW) message.
     return str(exc) if isinstance(exc, ValueError) else f"{type(exc).__name__}: {exc}"
@@ -232,7 +247,7 @@ def main(argv=None) -> int:
         "--output-dir",
         type=Path,
         default=None,
-        help="（進階）統一輸出資料夾；預設輸出到每個盤的資料夾內。",
+        help="（進階）統一輸出資料夾；預設輸出到每個盤資料夾下的 stitched/ 子資料夾。",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -277,10 +292,13 @@ def main(argv=None) -> int:
     print()
 
     succeeded, failed = [], []
+    total_wells = 0
+    t_batch = time.monotonic()
     for i, (name, plate_dir, tile_dir) in enumerate(plates, 1):
         print(f"\n=== [{i}/{len(plates)}] {name} ===")
+        t0 = time.monotonic()
         try:
-            out_files = stitch_plate(name, plate_dir, tile_dir, args.output_dir, verbose=args.verbose)
+            out_files, n_wells = stitch_plate(name, plate_dir, tile_dir, args.output_dir, verbose=args.verbose)
         except KeyboardInterrupt:
             print("\n中斷。")
             raise
@@ -293,12 +311,14 @@ def main(argv=None) -> int:
             continue
 
         succeeded.append((name, out_files))
-        print(f"  ✓ 完成（{len(out_files)} 個檔案）")
+        total_wells += n_wells
+        print(f"  ✓ 完成（{len(out_files)} 個檔案）{_timing(time.monotonic() - t0, n_wells)}")
         for f in out_files:
             print(f"    - {f}")
 
     print("\n" + "=" * 50)
-    print(f"批次結果：✓ 成功 {len(succeeded)} 個   ✗ 失敗 {len(failed)} 個")
+    print(f"批次結果：✓ 成功 {len(succeeded)} 個   ✗ 失敗 {len(failed)} 個"
+          f"{_timing(time.monotonic() - t_batch, total_wells)}")
     if failed:
         print("\n失敗清單：")
         for name, reason in failed:

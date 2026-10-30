@@ -164,17 +164,18 @@ uv run stitch /path/to/A /path/to/B /path/to/C
 
 ## 四、縫好的圖在哪？
 
-縫好的結果會放在**該盤資料夾下**（不是更深的 `TimePoint_1` 裡），
+縫好的結果會放在**該盤資料夾下的 `stitched/` 子資料夾**（不是更深的 `TimePoint_1` 裡），
 每個 well、每個 channel 一個獨立 TIF：
 
 ```
 RCE-24W-Sample-V52-Control-G-HT2/
 ├─ 2026-05-08/...（原本的 tile 結構，沒動）
-├─ RCE-24W-Sample-V52-Control-G-HT2-A01-TX.tif       ← 新的縫好的圖
-├─ RCE-24W-Sample-V52-Control-G-HT2-A01-FITC.tif
-├─ RCE-24W-Sample-V52-Control-G-HT2-A02-TX.tif
-├─ RCE-24W-Sample-V52-Control-G-HT2-A02-FITC.tif
-└─ ...
+└─ stitched/                                            ← 新的縫好的圖都在這裡
+   ├─ RCE-24W-Sample-V52-Control-G-HT2-A01-TX.ome.tif
+   ├─ RCE-24W-Sample-V52-Control-G-HT2-A01-FITC.ome.tif
+   ├─ RCE-24W-Sample-V52-Control-G-HT2-A02-TX.ome.tif
+   ├─ RCE-24W-Sample-V52-Control-G-HT2-A02-FITC.ome.tif
+   └─ ...
 ```
 
 > Channel 名（`TX`、`FITC`、`TransmittedLight` 等）是來自顯微鏡 metadata 裡的 `_IllumSetting_`，
@@ -190,7 +191,7 @@ RCE-24W-Sample-V52-Control-G-HT2/
 **請用 [Fiji](https://fiji.sc/)，不要用原版 ImageJ。**
 
 原版 ImageJ 打開會出現 **「Unsupported format」** 錯誤，這不是檔案壞掉。
-因為縫好的 `.tif` 其實是 **OME-TIFF + BigTIFF + 多解析度金字塔**三合一格式：
+因為縫好的 `.ome.tif` 其實是 **OME-TIFF + BigTIFF + 多解析度金字塔**三合一格式：
 裡面有完整的顯微鏡 metadata（pixel size、channel 名、拍攝時間），檔案可以超過 4GB，
 並內建縮圖快取讓大圖能瞬開。原版 ImageJ 三個都不支援。
 
@@ -206,8 +207,10 @@ RCE-24W-Sample-V52-Control-G-HT2/
 
 **開縫好的圖**：
 
-- 直接把 `.tif` 從 Finder 拖到 Fiji 視窗，或用 `File → Open`
+- **不要把縫好的圖搬到跟顯微鏡 `.HTD` 檔同一個資料夾**，Bio-Formats 看到 `.HTD` 會誤判成 MetaXpress 原始資料而開不了（Log 會出現 `CellWorxReader ... ArrayIndexOutOfBoundsException`）。留在 `stitched/` 裡就沒事
+- 直接把 `.ome.tif` 從 Finder 拖到 Fiji 視窗，或用 `File → Open`（副檔名是 `.ome.tif` Fiji 才會自動用 Bio-Formats 開；如果檔名被改成 `.tif`，請改用 `File → Import → Bio-Formats`）
 - 會跳出「Bio-Formats Import Options」對話框，**直接按 OK 即可**（預設值就好）
+- 不想每次都跳對話框：Plugins → Bio-Formats → **Bio-Formats Plugins Configuration** → **Formats** 分頁 → 找到 **OME-TIFF** → 勾 **Windowless**。之後拖進去直接開，會沿用最後一次按 OK 的設定。每台電腦設一次
 - 第一次打開大圖可能要 5–30 秒讀金字塔，之後縮放就很順
 
 > 進階選項：QuPath（病理影像專用）、napari（Python）也能讀。看個人習慣。

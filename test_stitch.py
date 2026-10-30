@@ -59,10 +59,10 @@ def check(root: Path, src):
     from acrocyte_manufacture.ashlar_adapter import FileSeriesMetadata2
     site0 = FileSeriesMetadata2(root / "P1" / "2026-10-28" / "1234" / "TimePoint_1").sites[0]
     assert site0["channels"] == ("DAPI", "FITC"), f"rank order broken: {site0['channels']}"
-    out = root / "P1"
-    assert not list(out.glob("P1-B02-*.tif")), "incomplete well was not skipped"
+    out = root / "P1" / "stitched"
+    assert not list(out.glob("P1-B02-*.ome.tif")), "incomplete well was not skipped"
     for ch in ("DAPI", "FITC"):
-        f = out / f"P1-A01-{ch}.tif"
+        f = out / f"P1-A01-{ch}.ome.tif"
         assert f.exists(), f"missing {f}"
         img = np.squeeze(tifffile.imread(f, level=0))
         assert img.shape == src[ch].shape, (img.shape, src[ch].shape)
