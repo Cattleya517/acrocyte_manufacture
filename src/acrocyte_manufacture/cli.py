@@ -281,9 +281,22 @@ def _collect_plates(paths: list[Path]) -> list[tuple[str, Path, Path]]:
     return plates
 
 
+def _input_prefilled(prompt: str, default: str) -> str:
+    """input() with `default` already typed on the line, so Enter accepts it visibly."""
+    try:
+        import readline  # Linux/macOS only; absent on Windows-native Python
+    except ImportError:
+        return input(prompt)
+    readline.set_startup_hook(lambda: readline.insert_text(default))
+    try:
+        return input(prompt)
+    finally:
+        readline.set_startup_hook()
+
+
 def _confirm(n: int) -> bool:
     try:
-        ans = input(f"要縫這 {n} 個盤嗎？[Y/n] ").strip().lower()
+        ans = _input_prefilled(f"要縫這 {n} 個盤嗎？[Y/n] ", "Y").strip().lower()
     except EOFError:  # no tty (test, CI, docker without -t): go ahead
         ans = ""
     except KeyboardInterrupt:
