@@ -26,6 +26,7 @@ import datetime
 import logging
 import os
 import re
+import shlex
 import traceback
 import warnings
 from importlib.metadata import version
@@ -224,6 +225,73 @@ def _timing(seconds: float, n_wells: int) -> str:
     return txt
 
 
+def _parse_dragged(line: str) -> list[str]:
+    """Split a line of paths dragged into a terminal.
+
+    Accepts what macOS Terminal and Windows PowerShell paste: `/a/b\ c`,
+    `"C:\\a b"`, `'E:\\x'`, a leading `& `, and several of those in one line.
+    """
+    line = re.sub(r"^\s*&\s*", "", line.strip())
+    # POSIX shlex would eat the backslashes of a Windows path — flip them first;
+    # the drive-letter mapping below accepts both separators.
+    if re.match(r"""^['"]?[A-Za-z]:[\\/]""", line):
+        line = line.replace("\\", "/")
+    return shlex.split(line)
+
+
+def _ask_paths() -> list[Path]:
+    print("把要縫的資料夾拖進這個視窗（可以一次拖多個），然後按 Enter：")
+    while True:
+        try:
+            line = input("> ")
+        except EOFError:
+            print("\n沒有收到輸入。用 Docker 時請在 docker run 加上 -it，或把資料夾路徑直接接在指令後面。")
+            return []
+        except KeyboardInterrupt:
+            print("\n中斷。")
+            return []
+        try:
+            parts = _parse_dragged(line)
+        except ValueError as exc:  # unbalanced quotes
+            print(f"  路徑看不懂（{exc}），請再拖一次：")
+            continue
+        if parts:
+            return [Path(x) for x in parts]
+
+
+def _collect_plates(paths: list[Path]) -> list[tuple[str, Path, Path]]:
+    """Expand every input to (plate_name, plate_dir, tile_dir); print and skip bad ones."""
+    plates: list[tuple[str, Path, Path]] = []
+    for raw in paths:
+        path = raw.expanduser().resolve()
+        # ponytail: Docker on Windows mounts `-v C:\:/c`, so dragged C:\... paths map to /c/...
+        if not path.exists() and (m := re.match(r"([A-Za-z]):[\\/](.*)", str(raw))):
+            path = Path("/" + m[1].lower(), m[2].replace("\\", "/"))
+        if not path.exists():
+            print(f"✗ 略過 {path}：路徑不存在")
+            continue
+        if not path.is_dir():
+            print(f"✗ 略過 {path}：不是資料夾")
+            continue
+        found = find_plates(path)
+        if not found:
+            print(f"✗ 略過 {path}：找不到任何 .tif 檔")
+            continue
+        plates.extend(found)
+    return plates
+
+
+def _confirm(n: int) -> bool:
+    try:
+        ans = input(f"要縫這 {n} 個盤嗎？[Y/n] ").strip().lower()
+    except EOFError:  # no tty (test, CI, docker without -t): go ahead
+        ans = ""
+    except KeyboardInterrupt:
+        print("\n中斷。")
+        return False
+    return not ans.startswith("n")
+
+
 def _human_error(exc: BaseException) -> str:
     # metamorphtiff.scan raises ValueError with a user-facing (zh-TW) message.
     return str(exc) if isinstance(exc, ValueError) else f"{type(exc).__name__}: {exc}"
@@ -239,9 +307,15 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "paths",
-        nargs="+",
+        nargs="*",
         type=Path,
-        help="一個或多個資料夾。可以拖盤資料夾、分類資料夾、或母資料夾——工具自動找到盤名跟 tile 位置。",
+        help="一個或多個資料夾。可以拖盤資料夾、分類資料夾、或母資料夾——工具自動找到盤名跟 tile 位置。"
+             "不給的話會在畫面上請你拖進來。",
+    )
+    parser.add_argument(
+        "-y", "--yes",
+        action="store_true",
+        help="不問「要縫嗎」，直接開始。",
     )
     parser.add_argument(
         "--output-dir",
@@ -261,35 +335,27 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # Expand every input to (plate_name, plate_dir, tile_dir) entries.
-    plates: list[tuple[str, Path, Path]] = []
-    for raw in args.paths:
-        path = raw.expanduser().resolve()
-        # ponytail: Docker on Windows mounts `-v C:\:/c`, so dragged C:\... paths map to /c/...
-        if not path.exists() and (m := re.match(r"([A-Za-z]):[\\/](.*)", str(raw))):
-            path = Path("/" + m[1].lower(), m[2].replace("\\", "/"))
-        if not path.exists():
-            print(f"✗ 略過 {path}：路徑不存在")
-            continue
-        if not path.is_dir():
-            print(f"✗ 略過 {path}：不是資料夾")
-            continue
-        found = find_plates(path)
-        if not found:
-            print(f"✗ 略過 {path}：找不到任何 .tif 檔")
-            continue
-        plates.extend(found)
-
+    if args.paths:
+        plates = _collect_plates(args.paths)
+    else:  # interactive: keep asking until something stitchable shows up
+        plates = []
+        while not plates:
+            paths = _ask_paths()
+            if not paths:
+                return 1
+            plates = _collect_plates(paths)
     if not plates:
         print("沒有任何盤可以縫，結束。")
         return 1
 
-    # Preview: list detected plates so user can Ctrl-C if wrong.
     print(f"\n偵測到 {len(plates)} 個盤：")
     for i, (name, _, tile_dir) in enumerate(plates, 1):
         print(f"  {i:>3}. {name}")
         print(f"        tile: {tile_dir}")
     print()
+    if not args.yes and not _confirm(len(plates)):
+        print("取消。")
+        return 1
 
     succeeded, failed = [], []
     total_wells = 0

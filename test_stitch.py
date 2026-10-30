@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import tifffile
 
-from acrocyte_manufacture.cli import main
+from acrocyte_manufacture.cli import _parse_dragged, main
 
 TILE, OVERLAP, PX = 1024, 100, 0.65  # px, px, µm
 SCAN = "2026:10:28 10:00:00"
@@ -76,7 +76,10 @@ if __name__ == "__main__":
     tmp = Path(tempfile.mkdtemp())
     try:
         src = make_plate(tmp, np.random.default_rng(0))
-        assert main([str(tmp)]) == 0
+        assert main([str(tmp), "-y"]) == 0
+        # dragged-path parsing: macOS escaped spaces, Windows quoted/& forms, several per line
+        assert _parse_dragged(r"/Volumes/Crucial\ X6/Day3") == ["/Volumes/Crucial X6/Day3"]
+        assert _parse_dragged(r"""& 'E:\RCE Monitor\Day3' "C:\a b" D:\c""") == ["E:/RCE Monitor/Day3", "C:/a b", "D:/c"]
         check(tmp, src)
         print("\nOK")
     finally:

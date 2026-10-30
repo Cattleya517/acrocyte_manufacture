@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Batch image-stitching CLI built on [Ashlar](https://github.com/labsyspharm/ashlar) for MetaXpress / MetaMorph TIFF tiles. Distributed as a uv-managed Python project that colleagues install with one script and run from a terminal. Intended replacement for `acrocyte_simple-stitch-app` (Electron+PyInstaller desktop app — too painful to package).
+Batch image-stitching CLI built on [Ashlar](https://github.com/labsyspharm/ashlar) for MetaXpress / MetaMorph TIFF tiles. Distributed to colleagues as a Docker image only (plus a one-file `stitch.bat` launcher on Windows); uv is for development. Intended replacement for `acrocyte_simple-stitch-app` (Electron+PyInstaller desktop app — too painful to package).
 
 The source for the stitching adapter classes was copied and stripped down from `../acrocyte_simple-stitch-app/stitcher/`. The original ashlar.sh bash pipeline in `../acrocyte/bin/ashlar.sh` is *not* the reference — Simple Stitch's `runner.py` / `ashlar_adapter.py` are.
 
@@ -17,19 +17,17 @@ uv run acrocyte-manufacture --version
 uv run python -m acrocyte_manufacture.cli ...    # equivalent, useful for debugging
 ```
 
-First-time end-user setup (also valid for a fresh dev checkout):
-
-- macOS: `bash setup.sh`
-- Windows: double-click `setup.bat` (wraps `setup.ps1` with `-ExecutionPolicy Bypass`)
-
-The setup scripts (a) install `uv` via the official one-liner if missing, (b) prepend `~/.local/bin` to PATH for the current shell session — needed so the just-installed uv is findable in the same script — (c) `uv python install` the version from `.python-version`, (d) `uv sync`.
+Run with no paths and the CLI goes interactive: it prompts for dragged paths (`_parse_dragged` accepts
+macOS backslash-escaped spaces, Windows `"…"`/`'…'`/`& '…'`, several per line), lists detected plates
+and asks `[Y/n]`. `-y` skips the confirmation; EOF on the confirmation counts as yes (so the test and
+non-tty runs don't hang), EOF on the path prompt exits 1 with a hint to add `-it`.
 
 `uv run python test_stitch.py` is the only automated check: it writes synthetic MetaMorph
 tiles (2×2 grid, 2 channels, one incomplete well), stitches them, and asserts the mosaic
 reproduces the source image and ScanTime/StitchTime landed in the OME-XML. Run it after any
 change to the three modules below. Real-data verification is still end-to-end on a tile folder.
 
-Docker: see README (build is `--platform linux/amd64` only; publish target `ghcr.io/cattleya517/acrocyte-manufacture`). User guides mount `/Users` + `/Volumes` (Mac) or `C:\` at `/c` (Windows) so dragged paths pass straight through; `cli.main` maps `C:\...` to `/c/...` when the literal path doesn't exist.
+Docker: see README (build is `--platform linux/amd64` only; publish target `ghcr.io/cattleya517/acrocyte-manufacture`). The Mac docker line mounts `/Users` + `/Volumes`; `stitch.bat` mounts each dragged drive `X:\` at `/x`, and `_collect_plates` maps `X:\...` to `/x/...` when the literal path doesn't exist.
 
 ## Architecture
 
@@ -53,7 +51,7 @@ The `_RANK` table in `metamorphtiff.py` only orders channels within a site (DAPI
 
 - **`metadata.num_channels` is the max channel count across the plate, not the first site's.** Acquisition sometimes drops a channel at a single site (a well of 25 sites with 24 having both channels and 1 having only one). A short `paths` tuple later crashes deep in `PyramidWriter.run()` with `IndexError: tuple index out of range` inside `assemble_channel`. `cli.py` validates per-well that every site has the full tuple — incomplete wells are skipped with a printed warning, complete wells still process. ashlar itself reads `metadata.num_channels` inside `Mosaic`, so the adapter property must agree with what the CLI iterates.
 
-- **Per-channel output is `Mosaic(channels=[c])` in a loop**, not `PyramidWriter([mosaic1, mosaic2, ...])`. The latter would produce a single multi-channel OME-TIFF; we want one file per channel, named `{dataset}-{channel_title}.tif`. Memory-wise the loop is also better — ashlar holds at most one channel's worth of pixels.
+- **Per-channel output is `Mosaic(channels=[c])` in a loop**, not `PyramidWriter([mosaic1, mosaic2, ...])`. The latter would produce a single multi-channel OME-TIFF; we want one file per channel, named `{dataset}-{channel_title}.ome.tif` under `<plate>/stitched/`. Memory-wise the loop is also better — ashlar holds at most one channel's worth of pixels.
 
 - **`ScanTime` / `StitchTime` are injected by string-replacing `</OME>` in the OME-XML ImageDescription** of the first IFD, via `tifffile.tiffcomment()`. Not a proper XML parse. Works because ashlar's OME-XML output is stable; if it ever stops working, switch to ElementTree. Failure is silent on purpose — metadata is nice-to-have, never blocks the output. **Important encoding caveat:** TIFF's ImageDescription is an ASCII tag, but ashlar writes `PhysicalSizeXUnit="µm"` (non-ASCII `\xb5`). Writing it back as-is raises `UnicodeEncodeError` deep inside `tifffile.overwrite`, which our `try/except: pass` would silently swallow — leaving every output without ScanTime/StitchTime. The fix is `desc.encode("ascii", errors="xmlcharrefreplace").decode("ascii")` before the write, which turns `µ` into `&#181;`. Don't remove that escape.
 
@@ -61,7 +59,7 @@ The `_RANK` table in `metamorphtiff.py` only orders channels within a site (DAPI
 
 - **`MD_PATTERN`** is intentionally loose: `r"(?P<plate_name>.+)_(?P<well_name>[A-Z]\d{2})_.+\.tiff?$"`. Series and channel are *not* captured from the filename — only used to filter what to scan. Real series/channel are derived from PlaneInfo metadata.
 
-- **Plate discovery (`find_plates`)** walks the input with `os.walk`, stops descending at the first folder containing `_<well>_` TIFs (the tile leaf), then walks back up past "noise" folder names (`TimePoint_N`, `YYYY-MM-DD`, bare numbers) to find the plate folder, clamped at the input root. Outputs go next to the plate folder, not the leaf.
+- **Plate discovery (`find_plates`)** walks the input with `os.walk`, stops descending at the first folder containing `_<well>_` TIFs (the tile leaf), then walks back up past "noise" folder names (`TimePoint_N`, `YYYY-MM-DD`, bare numbers) to find the plate folder, clamped at the input root. Outputs go to `<plate folder>/stitched/`, never beside the MetaXpress `.HTD` (Bio-Formats would then pick CellWorxReader and fail).
 
 - **Sequential by design.** No `--workers` flag. Parallel stitching of multiple datasets risks OOM because each `EdgeAligner` loads all DAPI tiles for one dataset into memory. Add concurrency only after measuring real footprints. The only in-scope I/O cost is the serial metadata pass over every tile header in `scan()`; thread it only if a NAS measurement says so — alignment and pyramid writing dominate everything else.
 
@@ -69,6 +67,10 @@ The `_RANK` table in `metamorphtiff.py` only orders channels within a site (DAPI
 
 ## Distribution model
 
-Users get the whole repo (zip from Releases, or `git clone`), run the setup script once, then `uv run acrocyte-manufacture` from inside the repo. There is no `uv tool install`, no pip-publish, no PyInstaller / Electron packaging. The end-user-facing docs are **`使用說明-Docker.md`** (Docker Desktop + `docker pull`, both OSes; the intended future sole path) and the older per-OS **`使用說明-Mac.md`** / **`使用說明-Windows.md`** (Traditional Chinese, assume zero CLI literacy). `README.md` is for developers.
+Docker only. Users install Docker Desktop and `docker pull ghcr.io/cattleya517/acrocyte-manufacture`; they never get the repo. The only end-user doc is **`使用說明-Docker.md`** (Traditional Chinese, assume zero CLI literacy); `README.md` is for developers.
 
-Upgrades: replace the repo folder (or `git pull`), re-run setup. `uv sync` is idempotent.
+- **macOS**: paste `docker run -it --rm -v /Users:/Users -v /Volumes:/Volumes <image>` with no path; the container prompts for a dragged folder.
+- **Windows**: `stitch.bat` from GitHub Releases (`releases/latest/download/stitch.bat`). It is a batch/PowerShell polyglot in one file: batch header does `chcp 65001` and re-invokes the same file through `Invoke-Expression` as UTF-8 (keep the first line ASCII, no BOM). It prompts for dragged paths, derives one `-v X:\:/x` per distinct drive letter, and `docker run -it`s with the paths as arguments, so the container's `C:\→/c` mapping in `_collect_plates` does the rest. It cannot be tested on macOS — changes need a real Windows run.
+- No `--interactive` flag, no in-container loop after a batch (a second batch on another drive could not be mounted into a running container), no UNC paths.
+
+Release: bump `pyproject.toml` version, `uv lock`, commit, `docker build`/push `latest` and `<ver>` tags, `git tag v<ver>`, `gh release create v<ver> stitch.bat`. Upgrades for users are just `docker pull`; `stitch.bat` only changes if the launcher itself changes.

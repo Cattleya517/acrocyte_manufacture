@@ -2,13 +2,12 @@
 
 這份說明假設你**完全沒用過命令列**，每一步都會講清楚。
 
-跟舊版（`setup.sh` / `setup.bat`）的差別：**不用拿工具資料夾、不用裝 Python**。
-裝好 Docker Desktop 之後，縫圖跟升級都只是一行指令。
+**不用拿工具資料夾、不用裝 Python**。裝好 Docker Desktop 之後，縫圖就是拖資料夾、按 Enter。
 
 縫圖工具一共就兩件事要做：
 
-1. **只做一次**：安裝 Docker Desktop，下載縫圖映像檔。
-2. **每次拿到新資料**：開終端機 → 貼一行指令 → 把資料夾拖進去 → 按 Enter。
+1. **只做一次**：安裝 Docker Desktop，下載縫圖映像檔，Windows 再多下載一個 `stitch.bat`。
+2. **每次拿到新資料**：Windows 雙擊 `stitch.bat`（macOS 貼一行指令）→ 把資料夾拖進去 → Enter → Enter。
 
 ---
 
@@ -25,6 +24,8 @@
 
 > **Windows 注意**：安裝需要**管理員權限**，並會啟用 WSL 2（Windows 內建的 Linux 子系統）。
 > 公司電腦如果被 IT 鎖住，請先找 IT 開通。
+> 裝完 Docker Desktop 啟動時如果說 WSL 2 不完整：用**系統管理員**身分開 PowerShell，
+> 貼 `wsl --install --no-distribution`，重開機再試。還是不行就是 BIOS 沒開虛擬化，找工程師。
 
 安裝完**打開 Docker Desktop 一次**（之後它會常駐在背景，開機自動啟動）。
 第一次會問你要不要登入帳號，**按 Skip 跳過即可**。
@@ -32,7 +33,8 @@
 
 ### Step 2：下載縫圖映像檔
 
-打開終端機（怎麼開請看下面「二、Step 1」），**不用進任何資料夾**，直接貼這行：
+打開終端機（macOS：`⌘ + 空白鍵` 搜「終端機」；Windows：`Win + X` → 「終端機」），
+**不用進任何資料夾**，直接貼這行：
 
 ```
 docker pull ghcr.io/cattleya517/acrocyte-manufacture
@@ -42,97 +44,77 @@ docker pull ghcr.io/cattleya517/acrocyte-manufacture
 
 如果中途出現紅色錯誤訊息，**請截圖傳給工程師**，不要自己亂試。
 
+### Step 3（只有 Windows）：下載 `stitch.bat` 放桌面
+
+這是一個小啟動器，幫你把拖進來的資料夾所在的磁碟機接給 Docker。下載一次放桌面就好：
+
+<https://github.com/Cattleya517/acrocyte_manufacture/releases/latest/download/stitch.bat>
+
+> 瀏覽器會擋 `.bat`：Edge / Chrome 下載列會說「無法安全下載」，點「⋯」→「**保留**」→「**仍要保留**」。
+> 第一次雙擊時 Windows 會跳藍色的 SmartScreen 視窗，點「**其他資訊**」→「**仍要執行**」。
+> 之後就不會再問了。
+
+macOS 不需要這一步。
+
 ---
 
 ## 二、每次拿到新資料時：縫圖
 
-### Step 1：打開終端機
+### Windows
 
-- **macOS**：按 `⌘ + 空白鍵` 開啟 Spotlight，輸入「終端機」或「Terminal」，按 Enter。
-- **Windows**：按 `Win + X`（或對「開始」按鈕按右鍵）→ 選「終端機」或「Windows PowerShell」。
+1. 雙擊桌面的 `stitch.bat`，會開一個黑色視窗。
+2. 看到「把要縫的資料夾拖進這個視窗」，就把資料夾**從檔案總管拖到那個視窗**，按 Enter。
+3. 工具會列出偵測到的盤（見下面「開跑前會看到偵測清單」），**再按一次 Enter** 就開始縫。
+4. 縫完會印結果和耗時，「按任意鍵關閉此視窗」。
 
-不需要進任何資料夾，開在哪裡都一樣。
+要縫下一批就再雙擊一次。
 
-### Step 2：貼上縫圖指令並拖入要縫的資料夾
+### macOS
 
-**macOS** 貼這行（最後**保留一個空白**，**不要按 Enter**）：
+1. 打開終端機（`⌘ + 空白鍵` 搜「終端機」），貼這行按 Enter：
 
-```
-docker run --rm --platform linux/amd64 -v /Users:/Users -v /Volumes:/Volumes ghcr.io/cattleya517/acrocyte-manufacture 
-```
+   ```
+   docker run -it --rm --platform linux/amd64 -v /Users:/Users -v /Volumes:/Volumes ghcr.io/cattleya517/acrocyte-manufacture
+   ```
 
-**Windows** 貼這行（最後**保留一個空白**，**不要按 Enter**）：
+2. 看到「把要縫的資料夾拖進這個視窗」，就把資料夾**從 Finder 拖到終端機視窗**，按 Enter。
+3. 列出偵測到的盤後，**再按一次 Enter** 就開始縫。
 
-```
-docker run --rm -v C:\:/c ghcr.io/cattleya517/acrocyte-manufacture 
-```
+> 這行指令每次都一模一樣，建議存在備忘錄裡。
 
-> **Windows 資料在別的槽**（例如 D 槽）：在 `-v C:\:/c` 後面再加一段 `-v D:\:/d`。
-> **網路磁碟機**（NAS 對應出來的 Z 槽之類）Docker 讀不到，請先把資料複製到本機。
-
-然後把你要縫的資料夾**從 Finder / 檔案總管拖到終端機視窗**。可以拖：
+### 可以拖什麼？
 
 - **某個盤的資料夾**（例如 `RCE-24W-Sample-V52-Control-G-HT2`）
 - **分類資料夾**（例如裡面放好幾盤的 `BF_FITC`）
 - **母資料夾**（例如整個 `For Adam`，工具會自動找到底下所有的盤）
+- **一次框選好幾個資料夾一起拖**，會一個接一個依序縫（不會同時跑，避免電腦負荷不了）
 
-你會看到指令變成類似：
-
-```
-docker run --rm --platform linux/amd64 -v /Users:/Users -v /Volumes:/Volumes ghcr.io/cattleya517/acrocyte-manufacture /Users/yourname/Desktop/今日批次
-```
-
-確認沒問題後按 Enter。
-
-> 這行指令每次都一模一樣，建議存在備忘錄裡，每次複製貼上再拖資料夾。
-
----
-
-## 三、一次縫好幾個資料夾（批次）
-
-兩種方式：
-
-### 方式 A：拖多個資料夾
-
-貼完指令之後，**依序把每個要縫的資料夾都拖進來**
-（每拖一個，再空一格，再拖下一個）：
-
-```
-docker run --rm -v C:\:/c ghcr.io/cattleya517/acrocyte-manufacture C:\path\to\A C:\path\to\B C:\path\to\C
-```
-
-按 Enter，會**一個接一個**依序縫（不會同時跑，避免你的電腦負荷不了）。
-
-### 方式 B：拖一個母資料夾
-
-如果你已經把今天所有 dataset 各自放在子資料夾裡，拖**母資料夾**進去，
-工具會自動找到所有子層的盤，每個都縫一遍。
+> **網路磁碟機**（NAS 對應出來的 Z 槽、`\\server\...`）Docker 讀不到，請先把資料複製到本機。
 
 ### 開跑前會看到偵測清單
-
-按 Enter 後，工具會先列出找到哪些盤，例如：
 
 ```
 偵測到 3 個盤：
     1. RCE-24W-Sample-V52-Control-G-HT2
-        tile: /c/Users/yourname/.../HT2/2026-05-08/487/TimePoint_1
+        tile: /e/RCE-Cell culture Monitor/.../HT2/2026-05-08/487/TimePoint_1
     2. RCE-24W-Sample-V52-Control-G-LT3
         tile: ...
     3. RCE-24W-Sample-V52-Control-G-RT3
         tile: ...
+
+要縫這 3 個盤嗎？[Y/n]
 ```
 
-> Windows 上路徑會顯示成 `/c/Users/...`（Docker 裡面看到的寫法），就是你的 `C:\Users\...`，正常。
+直接按 **Enter** 就開始。清單錯了（盤名怪怪的、多了不該縫的東西）就打 `n` 按 Enter 結束，改拖正確的資料夾再來一次。
 
-如果清單錯了（例如盤名怪怪的、或多了不該縫的東西），按 `Control + C` 中止，
-然後改拖正確的資料夾再來一次。
+> Windows 上路徑會顯示成 `/e/...`（Docker 裡面看到的寫法），就是你的 `E:\...`，正常。
 
 ### 中途出錯怎麼辦？
 
 批次中如果某個盤失敗，**其他的會繼續跑**，最後會印出一張總表：
 
 ```
-✓ 成功 2 個   ✗ 失敗 1 個
+批次結果：✓ 成功 2 個   ✗ 失敗 1 個  耗時 12 分 3 秒（46 個 well，平均 15.7 秒/well）
 失敗清單：
   - 20240501-plate04：偵測到 4 張 tile，但檔名不符合 MetaXpress 格式
 ```
@@ -141,7 +123,7 @@ docker run --rm -v C:\:/c ghcr.io/cattleya517/acrocyte-manufacture C:\path\to\A 
 
 ---
 
-## 四、縫好的圖在哪？
+## 三、縫好的圖在哪？
 
 縫好的結果會放在**該盤資料夾下的 `stitched/` 子資料夾**（不是更深的 `TimePoint_1` 裡），
 每個 well、每個 channel 一個獨立 TIF：
@@ -196,7 +178,7 @@ RCE-24W-Sample-V52-Control-G-HT2/
 
 ---
 
-## 五、如果有 well 缺檔
+## 四、如果有 well 缺檔
 
 如果某個 well 的某個 site 缺了 channel 檔（採集時掉了），整個 well 會被**跳過**並印警告：
 
@@ -216,14 +198,16 @@ RCE-24W-Sample-V52-Control-G-HT2/
 
 ---
 
-## 六、常見錯誤
+## 五、常見錯誤
 
 | 現象 | 可能原因 | 怎麼辦 |
 |---|---|---|
 | `command not found: docker` / `無法辨識 'docker'` | Docker Desktop 沒裝好，或裝完沒重開終端機 | 關掉終端機重開；還是不行就重開機 |
 | `Cannot connect to the Docker daemon` / `error during connect` | Docker Desktop 沒有在跑 | 打開 Docker Desktop，等左下角「Engine running」再試 |
 | `Unable to find image ... locally` 然後開始下載 | 還沒做過 `docker pull` | 等它下載完會自己開始跑，正常 |
-| `✗ 略過 ...：路徑不存在` | 資料夾在沒掛進去的槽（Windows 的 D 槽、網路磁碟機） | 加 `-v D:\:/d`，或把資料複製到 C 槽 |
+| `✗ 略過 ...：路徑不存在` | 資料夾在網路磁碟機，或 macOS 上不在 `/Users`、`/Volumes` 底下 | 把資料複製到本機 / 使用者資料夾再試 |
+| `沒有收到輸入。用 Docker 時請在 docker run 加上 -it` | macOS 貼的指令少了 `-it` | 照上面「二、macOS」那行重貼 |
+| 雙擊 `stitch.bat` 視窗一閃就關 | Docker Desktop 沒開，或 `.bat` 被瀏覽器改過名 | 先開 Docker Desktop；確認檔名是 `stitch.bat` 不是 `stitch.bat.txt` |
 | `WARNING: The requested image's platform (linux/amd64) does not match` | Apple Silicon Mac 用模擬跑，正常 | 不用理它 |
 | Apple Silicon Mac 跑特別慢 | 沒開 Rosetta 模擬 | Docker Desktop → Settings → General → 勾「Use Rosetta for x86_64/amd64 emulation」 |
 | 跑到一半電腦變很慢，或出現 `Killed` | 縫圖吃很多記憶體 | Docker Desktop → Settings → Resources → Memory 調到 8 GB 以上 |
@@ -234,7 +218,7 @@ RCE-24W-Sample-V52-Control-G-HT2/
 
 ---
 
-## 七、要升級工具時
+## 六、要升級工具時
 
 如果工程師告訴你「有新版本」，再貼一次：
 
@@ -242,4 +226,4 @@ RCE-24W-Sample-V52-Control-G-HT2/
 docker pull ghcr.io/cattleya517/acrocyte-manufacture
 ```
 
-完成。不用換資料夾、不用重跑安裝。
+完成。`stitch.bat` 不用換，它只負責啟動，縫圖程式都在映像檔裡。

@@ -7,15 +7,16 @@
 
 ## 給使用者
 
-請看 [使用說明-Docker.md](./使用說明-Docker.md)（裝 Docker Desktop 後 `docker pull` 即可），
-或舊版 [使用說明-Mac.md](./使用說明-Mac.md) / [使用說明-Windows.md](./使用說明-Windows.md)（跑一次 `setup.sh` / `setup.bat`）。
+請看 [使用說明-Docker.md](./使用說明-Docker.md)。使用者只需要 Docker Desktop + `docker pull`；
+Windows 再從 [Releases](https://github.com/Cattleya517/acrocyte_manufacture/releases/latest) 下載 `stitch.bat`（單一檔案的啟動器，幫拖進來的磁碟機組 `-v`）。
+沒有其他安裝方式。
 
 ## 給開發者
 
 ```bash
 uv sync
-uv run stitch <資料夾路徑>           # 短別名
-uv run acrocyte-manufacture <資料夾路徑>   # 完整名稱（等效）
+uv run stitch <資料夾路徑> [-y]        # 短別名；-y 跳過「要縫嗎」確認
+uv run acrocyte-manufacture              # 不給路徑 → 互動模式（提示拖資料夾）
 ```
 
 自我檢查（合成 tile，約 5 秒）：`uv run python test_stitch.py`
@@ -29,6 +30,8 @@ docker run --rm --platform linux/amd64 -v /path/to/plates:/data ghcr.io/cattleya
 # 發佈給使用者 docker pull（PAT 需 write:packages 權限；第一次推完到 GitHub Packages 把 visibility 改 Public）：
 echo "$GITHUB_PAT" | docker login ghcr.io -u <GitHub 帳號> --password-stdin
 docker push ghcr.io/cattleya517/acrocyte-manufacture
+# 發版：bump pyproject version → uv lock → commit → build/push latest 與 <ver> 兩個 tag → git tag v<ver>
+#       → gh release create v<ver> stitch.bat（使用說明的下載連結指向 releases/latest/download/stitch.bat）
 ```
 
 主要相依：
