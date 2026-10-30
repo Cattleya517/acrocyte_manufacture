@@ -1,6 +1,6 @@
 <# : batch portion
 @echo off
-REM Double-click this file. PowerShell below re-reads this same file as UTF-8 and runs the part after #>.
+REM Double-click this file. PowerShell re-reads this same file as UTF-8 and runs the PowerShell part.
 chcp 65001 >nul
 set "STITCH_SELF=%~f0"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression ([IO.File]::ReadAllText($env:STITCH_SELF, [Text.Encoding]::UTF8))"
